@@ -15,6 +15,7 @@
         </div>
         <div class="status" id="status">idle</div>
         <div class="topbar-actions">
+          <button id="presetBloom" class="ghost">Preset · Bloom</button>
           <button id="presetEnvelope" class="ghost">Preset · Envelope</button>
           <button id="presetMomentum" class="ghost">Preset · Momentum</button>
           <button id="presetHand" class="ghost">Preset · Hand</button>
@@ -73,6 +74,7 @@
             <div class="seg" id="modeSeg">
               <button data-mode="position" class="seg-btn active">Position</button>
               <button data-mode="velocity" class="seg-btn">Velocity</button>
+              <button data-mode="audio" class="seg-btn">Audio</button>
             </div>
             <div class="panel-row">
               <label>Loop</label>
@@ -110,13 +112,20 @@
               <label>Audio Drives Playhead</label>
               <input type="checkbox" id="audioDrives" checked />
             </div>
+            <div class="panel-row">
+              <label>Audio Invert (loud=start)</label>
+              <input type="checkbox" id="audioInvert" />
+            </div>
             <div data-knob="eAttack" data-min="1" data-max="500" data-step="1" data-value="80" data-label="Attack (ms)"></div>
             <div data-knob="eRelease" data-min="20" data-max="2000" data-step="10" data-value="300" data-label="Release (ms)"></div>
+            <div data-knob="eMacroSmooth" data-min="100" data-max="3000" data-step="20" data-value="600" data-label="Macro Smooth (ms)"></div>
+            <div data-knob="eAudioMix" data-min="0" data-max="1" data-step="0.01" data-value="0.20" data-label="Macro ↔ Fast Mix"></div>
             <div data-knob="eSens" data-min="0.1" data-max="5" data-step="0.05" data-value="1.20" data-label="Sensitivity"></div>
             <div data-knob="eCurve" data-min="0.2" data-max="3" data-step="0.05" data-value="1.20" data-label="Curve / Punch"></div>
             <div data-knob="eJitter" data-min="0" data-max="1" data-step="0.01" data-value="0.20" data-label="Jitter (hats)"></div>
             <div data-knob="eSnap" data-min="0" data-max="1" data-step="0.01" data-value="0.30" data-label="Snap (bass)"></div>
             <div class="meter"><div class="meter-fill" id="envMeter"></div></div>
+            <div class="meter" style="margin-top:4px"><div class="meter-fill" id="macroMeter" style="background:linear-gradient(90deg,#19e6ff,#7be0ff)"></div></div>
           </div>
 
           <!-- Segment Roam -->

@@ -8,18 +8,21 @@ import {
 
 // ---------- State ----------
 const state = {
-  mode: "position", // 'position' | 'velocity'
+  mode: "position", // 'position' | 'velocity' | 'audio'
   loop: true,
   backward: true,
   twoHand: false,
   invertPinch: false,
   audioDrives: true,
+  audioInvert: false,
   // hand
   hSensitivity: 2.0, hDamping: 0.90, hSmooth: 80,
   hReach: 1.0, hFloor: 0.0, hDead: 0.02,
   // envelope
   eAttack: 80, eRelease: 300, eSens: 1.20,
   eCurve: 1.20, eJitter: 0.20, eSnap: 0.30,
+  eMacroSmooth: 600, // long-window follower for "bloom" mode
+  eAudioMix: 0.50,   // when in audio mode, blend macro vs envelope
   // roam
   roamOn: false, rSize: 0.25, rJitter: 0.5, roamDir: "any",
   rCont: 0.35, rGlide: 80, rThresh: 0.55,
@@ -45,8 +48,10 @@ const rt = {
   pinchVel: 0,
   prevPinch: 0,
   envelope: 0,
+  macroEnv: 0, // long-smoothed amplitude for bloom-like position drive
   bass: 0, mid: 0, high: 0,
   transientLevel: 0, prevEnv: 0,
+  handPresent: false, // true while a hand is detected this frame
   segmentTarget: null, segmentGlideStart: 0, segmentFrom: 0, segmentTo: 0,
   hands: [],
   blobs: [],
@@ -65,6 +70,8 @@ const PRESETS = {
   envelope: { eAttack: 50, eRelease: 220, eSens: 1.5, eCurve: 1.4, eJitter: 0.3, eSnap: 0.5, audioDrives: true },
   momentum: { mBass: 1.4, mMid: 0.6, mHigh: 0.3, mDamp: 0.95, mElastic: 0.18 },
   hand:     { hSensitivity: 2.5, hDamping: 0.88, hSmooth: 60, hReach: 1.0, hFloor: 0.0, hDead: 0.015, invertPinch: false, mode: "position" },
+  // "Bloom" — smooth audio energy drives the playhead from start (silence) to end (loud)
+  bloom:    { mode: "audio", eMacroSmooth: 900, eAudioMix: 0.15, eSens: 1.6, eCurve: 1.0, audioDrives: true, audioInvert: false, hSmooth: 240, hFloor: 0, hReach: 1 },
 };
 
 // ---------- DOM ----------
@@ -146,14 +153,14 @@ function applyPreset(p) {
       const step = parseFloat(input.step);
       out.textContent = formatVal(p[k], step);
     }
-    const chk = $(k === "audioDrives" ? "audioDrives" : null);
-    if (chk) chk.checked = !!p[k];
+    // sync any matching checkbox by id
+    const chk = document.getElementById(k);
+    if (chk && chk.type === "checkbox") chk.checked = !!p[k];
     if (k === "mode") {
       document.querySelectorAll("#modeSeg .seg-btn").forEach(b => {
         b.classList.toggle("active", b.dataset.mode === p[k]);
       });
     }
-    if (k === "invertPinch") $("invertPinch").checked = !!p[k];
   }
 }
 
@@ -171,6 +178,7 @@ bindCheckbox("backwardChk", "backward");
 bindCheckbox("twoHand", "twoHand");
 bindCheckbox("invertPinch", "invertPinch");
 bindCheckbox("audioDrives", "audioDrives");
+bindCheckbox("audioInvert", "audioInvert");
 bindCheckbox("roamOn", "roamOn");
 bindCheckbox("blobOn", "blobOn");
 bindCheckbox("bIds", "bIds");
@@ -189,6 +197,7 @@ document.querySelectorAll("#modeSeg .seg-btn").forEach((btn) => {
 $("blobStyle").addEventListener("change", (e) => state.blobStyle = e.target.value);
 $("roamDir").addEventListener("change", (e) => state.roamDir = e.target.value);
 
+$("presetBloom").addEventListener("click", () => applyPreset(PRESETS.bloom));
 $("presetEnvelope").addEventListener("click", () => applyPreset(PRESETS.envelope));
 $("presetMomentum").addEventListener("click", () => applyPreset(PRESETS.momentum));
 $("presetHand").addEventListener("click", () => applyPreset(PRESETS.hand));
@@ -334,6 +343,10 @@ function readEnvelope(dt) {
   if (raw > rt.envelope) rt.envelope += (raw - rt.envelope) * att;
   else rt.envelope += (raw - rt.envelope) * rel;
   rt.envelope = Math.max(0, Math.min(1, rt.envelope));
+  // macro envelope — long single-pole follower (no transients)
+  const macroAlpha = 1 - Math.exp(-dt / Math.max(50, state.eMacroSmooth));
+  rt.macroEnv += (raw - rt.macroEnv) * macroAlpha;
+  rt.macroEnv = Math.max(0, Math.min(1, rt.macroEnv));
   // simple transient detection (delta against slower follower)
   rt.transientLevel = Math.max(0, rt.envelope - rt.prevEnv);
   rt.prevEnv = rt.prevEnv * 0.85 + rt.envelope * 0.15;
@@ -436,16 +449,18 @@ function classifyHands() {
 // ---------- Playhead Update ----------
 function updatePlayhead(dt) {
   const { main, blob } = classifyHands();
+  rt.handPresent = !!main;
 
-  // Smooth pinch (one-pole)
-  let pinchTarget = rt.smoothPinch;
+  // Smooth pinch (one-pole). When no hand is present, hold (don't drift to 0).
   if (main) {
-    pinchTarget = main.pinch;
+    const pinchTarget = main.pinch;
+    const sAlpha = 1 - Math.exp(-dt / Math.max(1, state.hSmooth));
+    const newSmooth = rt.smoothPinch + (pinchTarget - rt.smoothPinch) * sAlpha;
+    rt.pinchVel = (newSmooth - rt.smoothPinch) / Math.max(0.001, dt) * 1000;
+    rt.smoothPinch = newSmooth;
+  } else {
+    rt.pinchVel *= 0.85; // decay velocity but keep pinch position frozen
   }
-  const sAlpha = 1 - Math.exp(-dt / Math.max(1, state.hSmooth));
-  const newSmooth = rt.smoothPinch + (pinchTarget - rt.smoothPinch) * sAlpha;
-  rt.pinchVel = (newSmooth - rt.smoothPinch) / Math.max(0.001, dt) * 1000; // per second
-  rt.smoothPinch = newSmooth;
 
   // Map pinch to normalized 0..1 within reach/floor
   const reach = state.hReach, floor = state.hFloor;
@@ -464,11 +479,21 @@ function updatePlayhead(dt) {
     rt.mid  * state.mMid  * 0.4 +
     rt.high * state.mHigh * 0.3;
 
-  if (state.mode === "position") {
+  if (state.mode === "audio") {
+    // Audio bloom mode: macro envelope = playhead position directly.
+    // Blend macro (slow) vs envelope (fast) by eAudioMix; clamp to floor/reach.
+    let amp = rt.macroEnv * (1 - state.eAudioMix) + rt.envelope * state.eAudioMix;
+    if (state.audioInvert) amp = 1 - amp;
+    const target = state.hFloor + amp * span;
+    // Slow critically-damped follow (less jitter than spring physics)
+    const k = 1 - Math.exp(-dt / Math.max(20, state.hSmooth));
+    rt.playhead += (target - rt.playhead) * k;
+    rt.velocity = (target - rt.playhead) * 0.05;
+  } else if (state.mode === "position") {
     // Direct position with optional audio nudge
     let target = targetPosition;
     if (state.audioDrives && rt.audioLoaded) {
-      target += rt.envelope * 0.02 * (state.mElastic > 0 ? 1 : 1);
+      target += rt.envelope * 0.02;
     }
     target = Math.max(0, Math.min(1, target));
     // glide toward target — momentum still applies as additive
@@ -510,10 +535,12 @@ function updatePlayhead(dt) {
     if (rt.playhead < 0) { rt.playhead = 0; rt.velocity = 0; }
   }
 
-  // Apply to <video>
+  // Apply to <video> — threshold scales so slow movement seeks every ~80ms (1 frame)
   if (rt.videoLoaded && video.duration) {
     const t = rt.playhead * video.duration;
-    if (Math.abs(video.currentTime - t) > 0.04) {
+    const drift = Math.abs(video.currentTime - t);
+    const threshold = state.mode === "audio" ? 0.06 : 0.04;
+    if (drift > threshold) {
       try { video.currentTime = t; } catch (_) {}
     }
   }
@@ -521,8 +548,12 @@ function updatePlayhead(dt) {
   // HUD
   hudPlayhead.textContent = (rt.playhead * 100).toFixed(1) + "%";
   hudPinch.textContent = main ? rt.smoothPinch.toFixed(2) : "—";
-  hudEnv.textContent = rt.envelope.toFixed(2);
+  hudEnv.textContent = state.mode === "audio"
+    ? `${rt.macroEnv.toFixed(2)}m`
+    : rt.envelope.toFixed(2);
   envMeter.style.width = (rt.envelope * 100).toFixed(0) + "%";
+  const macroMeter = document.getElementById("macroMeter");
+  if (macroMeter) macroMeter.style.width = (rt.macroEnv * 100).toFixed(0) + "%";
   scrub.value = String(Math.round(rt.playhead * 1000));
   if (video.duration) {
     timeEl.textContent = `${fmtTime(video.currentTime)} / ${fmtTime(video.duration)}`;
