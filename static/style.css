@@ -1,0 +1,96 @@
+/* AVP - Audio-Reactive Video Playhead */
+
+html, body { margin: 0; padding: 0; height: 100%; background: #000; }
+
+body {
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Range slider styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: rgba(255,255,255,0.12);
+  border-radius: 3px;
+  outline: none;
+  margin-top: 6px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+input[type="range"]::-moz-range-thumb {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+/* Drop zone active state */
+.drop-active {
+  border-color: rgb(239 68 68) !important;
+  background: rgba(239, 68, 68, 0.05);
+}
+
+/* Canvas should be pixelated-free */
+canvas { image-rendering: auto; }
+
+/* No selection on UI chrome */
+header, aside, .preset-btn, label { user-select: none; }
+
+/* Scrollbar */
+aside::-webkit-scrollbar { width: 6px; }
+aside::-webkit-scrollbar-track { background: transparent; }
+aside::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+aside::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+.preset-btn.active {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgb(239 68 68);
+  color: #fff;
+}
+
+/* Mode switcher */
+.mode-btn {
+  color: rgba(255,255,255,0.5);
+  background: transparent;
+}
+.mode-btn:hover { color: rgba(255,255,255,0.85); }
+.mode-btn.active {
+  background: #fff;
+  color: #000;
+  font-weight: 600;
+}
+
+/* Envelope source + roam selector buttons */
+.env-src-btn.active,
+.roam-trig-btn.active,
+.roam-dir-btn.active,
+.hand-map-btn.active {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: rgb(239 68 68);
+  color: #fff;
+}
+
+/* Hand preview canvas — mirror feel, subtle glow when active */
+#hand-preview {
+  background: #000;
+}
+#pinch-meter {
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+}
+
+/* Segment indicator glow */
+#seg-indicator {
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.6);
+  transition: none;
+}

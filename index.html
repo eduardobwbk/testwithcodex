@@ -1,209 +1,725 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Hand & Audio Reactive Playhead</title>
-    <link rel="stylesheet" href="./styles.css" />
-  </head>
-  <body>
-    <div id="app">
-      <header class="topbar">
-        <div class="brand">
-          <span class="dot"></span>
-          <span>HAND × AUDIO REACTIVE PLAYHEAD</span>
-        </div>
-        <div class="status" id="status">idle</div>
-        <div class="topbar-actions">
-          <button id="presetBloom" class="ghost">Preset · Bloom</button>
-          <button id="presetEnvelope" class="ghost">Preset · Envelope</button>
-          <button id="presetMomentum" class="ghost">Preset · Momentum</button>
-          <button id="presetHand" class="ghost">Preset · Hand</button>
-          <button id="resetAll" class="ghost danger">Reset</button>
-        </div>
-      </header>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AVP — Audio-Reactive Video Playhead</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body class="bg-black text-white font-mono overflow-hidden">
 
-      <main class="layout">
-        <!-- Stage -->
-        <section class="stage">
-          <div class="stage-canvas">
-            <canvas id="output"></canvas>
-            <canvas id="overlay"></canvas>
-            <video id="video" playsinline muted></video>
-            <video id="webcam" playsinline muted autoplay></video>
-            <div class="hud" id="hud">
-              <div class="hud-row"><span>playhead</span><span id="hudPlayhead">0%</span></div>
-              <div class="hud-row"><span>pinch</span><span id="hudPinch">—</span></div>
-              <div class="hud-row"><span>env</span><span id="hudEnv">0.00</span></div>
-              <div class="hud-row"><span>fps</span><span id="hudFps">0</span></div>
-            </div>
-            <div class="dropzones">
-              <label class="dz" id="dzVideo">
-                <input type="file" id="videoFile" accept="video/*" hidden />
-                <div class="dz-title">VIDEO SOURCE</div>
-                <div class="dz-sub">Drop or click — mp4 / webm</div>
-              </label>
-              <label class="dz" id="dzAudio">
-                <input type="file" id="audioFile" accept="audio/*" hidden />
-                <div class="dz-title">AUDIO TRACK</div>
-                <div class="dz-sub">Drop or click — or use mic</div>
-                <button id="micBtn" class="mic">🎤 Mic</button>
-              </label>
-            </div>
-            <div class="transport">
-              <button id="playBtn" class="primary">▶︎ Play</button>
-              <button id="loopBtn" class="ghost">Loop</button>
-              <input type="range" id="scrub" min="0" max="1000" value="0" />
-              <span id="time">0:00 / 0:00</span>
-            </div>
+  <div id="app" class="w-screen h-screen flex flex-col">
+
+    <!-- Top bar -->
+    <header class="flex items-center justify-between px-5 py-3 border-b border-white/10 bg-black/80 backdrop-blur z-20">
+      <div class="flex items-center gap-3">
+        <div class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+        <h1 class="text-sm tracking-[0.3em] uppercase font-bold">AVP // Audio-Reactive Playhead</h1>
+      </div>
+      <div class="flex items-center gap-4 text-xs text-white/50">
+        <span id="status-text">idle</span>
+        <span id="fps-text" class="tabular-nums">— fps</span>
+      </div>
+    </header>
+
+    <!-- Main area -->
+    <main class="flex-1 flex min-h-0">
+
+      <!-- Sidebar -->
+      <aside class="w-80 border-r border-white/10 flex flex-col bg-black/60 overflow-y-auto">
+
+        <!-- Upload: Video -->
+        <section class="p-5 border-b border-white/10">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">01 · Video Source</label>
+          <div id="video-drop" class="mt-2 border border-dashed border-white/20 hover:border-white/50 rounded-lg p-5 text-center cursor-pointer transition-colors">
+            <i class="fas fa-film text-2xl text-white/40"></i>
+            <p class="text-xs mt-2 text-white/60">Drop video (up to 50s)<br/>or click to upload</p>
+            <input id="video-input" type="file" accept="video/*" class="hidden" />
           </div>
-
-          <aside class="cam">
-            <div class="cam-title">CAMERA</div>
-            <canvas id="camPreview"></canvas>
-            <button id="camBtn" class="primary">Enable Camera</button>
-            <div class="cam-meta" id="camMeta">no hands</div>
-          </aside>
-        </section>
-
-        <!-- Right column: controls -->
-        <section class="controls" id="controls">
-          <!-- Playhead Mode -->
-          <div class="panel">
-            <div class="panel-title">PLAYHEAD MODE</div>
-            <div class="seg" id="modeSeg">
-              <button data-mode="position" class="seg-btn active">Position</button>
-              <button data-mode="velocity" class="seg-btn">Velocity</button>
-              <button data-mode="audio" class="seg-btn">Audio</button>
-            </div>
-            <div class="panel-row">
-              <label>Loop</label>
-              <input type="checkbox" id="loopChk" checked />
-            </div>
-            <div class="panel-row">
-              <label>Allow Backward</label>
-              <input type="checkbox" id="backwardChk" checked />
-            </div>
+          <div id="video-meta" class="mt-3 text-[11px] text-white/50 hidden">
+            <div class="flex justify-between"><span>frames</span><span id="video-frames" class="text-white/80">-</span></div>
+            <div class="flex justify-between"><span>duration</span><span id="video-duration" class="text-white/80">-</span></div>
+            <div class="flex justify-between"><span>resolution</span><span id="video-res" class="text-white/80">-</span></div>
+            <div class="flex justify-between"><span>memory</span><span id="video-mem" class="text-white/80">-</span></div>
           </div>
-
-          <!-- Hand Controls -->
-          <div class="panel">
-            <div class="panel-title">HAND CONTROLS</div>
-            <div class="panel-row">
-              <label>Two-Hand Mode</label>
-              <input type="checkbox" id="twoHand" />
-            </div>
-            <div class="panel-row">
-              <label>Invert (close = forward)</label>
-              <input type="checkbox" id="invertPinch" />
-            </div>
-            <div data-knob="hSensitivity" data-min="0.1" data-max="5" data-step="0.05" data-value="2.0" data-label="Sensitivity"></div>
-            <div data-knob="hDamping" data-min="0" data-max="1" data-step="0.01" data-value="0.90" data-label="Damping"></div>
-            <div data-knob="hSmooth" data-min="0" data-max="400" data-step="5" data-value="80" data-label="Smoothing (ms)"></div>
-            <div data-knob="hReach" data-min="0" data-max="1" data-step="0.01" data-value="1.00" data-label="Reach"></div>
-            <div data-knob="hFloor" data-min="0" data-max="1" data-step="0.01" data-value="0.00" data-label="Floor"></div>
-            <div data-knob="hDead" data-min="0" data-max="0.2" data-step="0.005" data-value="0.02" data-label="Dead Zone"></div>
-          </div>
-
-          <!-- Envelope -->
-          <div class="panel">
-            <div class="panel-title">AUDIO ENVELOPE</div>
-            <div class="panel-row">
-              <label>Audio Drives Playhead</label>
-              <input type="checkbox" id="audioDrives" checked />
-            </div>
-            <div class="panel-row">
-              <label>Audio Invert (loud=start)</label>
-              <input type="checkbox" id="audioInvert" />
-            </div>
-            <div data-knob="eAttack" data-min="1" data-max="500" data-step="1" data-value="80" data-label="Attack (ms)"></div>
-            <div data-knob="eRelease" data-min="20" data-max="2000" data-step="10" data-value="300" data-label="Release (ms)"></div>
-            <div data-knob="eMacroSmooth" data-min="100" data-max="3000" data-step="20" data-value="600" data-label="Macro Smooth (ms)"></div>
-            <div data-knob="eAudioMix" data-min="0" data-max="1" data-step="0.01" data-value="0.20" data-label="Macro ↔ Fast Mix"></div>
-            <div data-knob="eSens" data-min="0.1" data-max="5" data-step="0.05" data-value="1.20" data-label="Sensitivity"></div>
-            <div data-knob="eCurve" data-min="0.2" data-max="3" data-step="0.05" data-value="1.20" data-label="Curve / Punch"></div>
-            <div data-knob="eJitter" data-min="0" data-max="1" data-step="0.01" data-value="0.20" data-label="Jitter (hats)"></div>
-            <div data-knob="eSnap" data-min="0" data-max="1" data-step="0.01" data-value="0.30" data-label="Snap (bass)"></div>
-            <div class="meter"><div class="meter-fill" id="envMeter"></div></div>
-            <div class="meter" style="margin-top:4px"><div class="meter-fill" id="macroMeter" style="background:linear-gradient(90deg,#19e6ff,#7be0ff)"></div></div>
-          </div>
-
-          <!-- Segment Roam -->
-          <div class="panel">
-            <div class="panel-title">SEGMENT ROAM</div>
-            <div class="panel-row">
-              <label>Enabled</label>
-              <input type="checkbox" id="roamOn" />
-            </div>
-            <div data-knob="rSize" data-min="0.05" data-max="1" data-step="0.01" data-value="0.25" data-label="Segment Size"></div>
-            <div data-knob="rJitter" data-min="0" data-max="1" data-step="0.01" data-value="0.5" data-label="Size Jitter"></div>
-            <div class="panel-row">
-              <label>Direction</label>
-              <select id="roamDir">
-                <option value="any">Any</option>
-                <option value="fwd">Forward</option>
-                <option value="bwd">Backward</option>
-              </select>
-            </div>
-            <div data-knob="rCont" data-min="0" data-max="1" data-step="0.01" data-value="0.35" data-label="Continuity"></div>
-            <div data-knob="rGlide" data-min="0" data-max="600" data-step="5" data-value="80" data-label="Glide (ms)"></div>
-            <div data-knob="rThresh" data-min="0.1" data-max="1" data-step="0.01" data-value="0.55" data-label="Transient Thresh"></div>
-          </div>
-
-          <!-- Momentum -->
-          <div class="panel">
-            <div class="panel-title">MOMENTUM / PHYSICS</div>
-            <div data-knob="mBass" data-min="0" data-max="3" data-step="0.05" data-value="0.80" data-label="Bass Drive"></div>
-            <div data-knob="mMid" data-min="0" data-max="3" data-step="0.05" data-value="0.40" data-label="Mid Drive"></div>
-            <div data-knob="mHigh" data-min="0" data-max="3" data-step="0.05" data-value="0.20" data-label="High Drive"></div>
-            <div data-knob="mDamp" data-min="0.5" data-max="0.999" data-step="0.001" data-value="0.92" data-label="Damping"></div>
-            <div data-knob="mElastic" data-min="0" data-max="1" data-step="0.01" data-value="0.10" data-label="Elastic Return"></div>
-          </div>
-
-          <!-- Blob Tracker -->
-          <div class="panel">
-            <div class="panel-title">BLOB TRACKER</div>
-            <div class="panel-row">
-              <label>Enabled</label>
-              <input type="checkbox" id="blobOn" checked />
-            </div>
-            <div class="panel-row">
-              <label>Style</label>
-              <select id="blobStyle">
-                <option>Circles</option>
-                <option>Hexagons</option>
-                <option>Boxes</option>
-                <option>Trails</option>
-              </select>
-            </div>
-            <div data-knob="bSens" data-min="2" data-max="80" data-step="1" data-value="22" data-label="Sensitivity"></div>
-            <div data-knob="bMinArea" data-min="10" data-max="5000" data-step="10" data-value="300" data-label="Min Area"></div>
-            <div data-knob="bMax" data-min="1" data-max="64" data-step="1" data-value="16" data-label="Max Blobs"></div>
-            <div data-knob="bSmooth" data-min="0" data-max="1" data-step="0.01" data-value="0.50" data-label="Motion Smooth"></div>
-            <div data-knob="bScale" data-min="0.15" data-max="1" data-step="0.05" data-value="0.5" data-label="Resolution"></div>
-            <div class="panel-row tiny">
-              <label><input type="checkbox" id="bIds" /> IDs</label>
-              <label><input type="checkbox" id="bXY" /> XY</label>
-              <label><input type="checkbox" id="bMetrics" checked /> Metrics</label>
-              <label><input type="checkbox" id="bConn" /> Connect</label>
-            </div>
-          </div>
-
-          <!-- Render -->
-          <div class="panel">
-            <div class="panel-title">RENDER</div>
-            <div data-knob="rTrail" data-min="0" data-max="1" data-step="0.01" data-value="0.30" data-label="Motion Trail"></div>
-            <div data-knob="rBlend" data-min="0" data-max="1" data-step="0.01" data-value="1.00" data-label="Frame Blend"></div>
-            <div data-knob="rGain" data-min="0" data-max="2" data-step="0.01" data-value="1.00" data-label="Output Gain"></div>
-            <div class="panel-row">
-              <label>Mirror Webcam</label>
-              <input type="checkbox" id="mirrorCam" checked />
-            </div>
+          <div id="video-progress" class="mt-3 h-1 bg-white/10 rounded overflow-hidden hidden">
+            <div id="video-progress-bar" class="h-full bg-red-500" style="width:0%"></div>
           </div>
         </section>
-      </main>
-    </div>
 
-    <script type="module" src="./app.js"></script>
-  </body>
+        <!-- Upload: Audio -->
+        <section class="p-5 border-b border-white/10">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">02 · Audio Track</label>
+          <div id="audio-drop" class="mt-2 border border-dashed border-white/20 hover:border-white/50 rounded-lg p-5 text-center cursor-pointer transition-colors">
+            <i class="fas fa-waveform-lines text-2xl text-white/40"></i>
+            <p class="text-xs mt-2 text-white/60">Drop audio track<br/>or click to upload</p>
+            <input id="audio-input" type="file" accept="audio/*" class="hidden" />
+          </div>
+          <div id="audio-meta" class="mt-3 text-[11px] text-white/50 hidden">
+            <div class="flex justify-between"><span>duration</span><span id="audio-duration" class="text-white/80">-</span></div>
+            <div class="flex justify-between"><span>sample rate</span><span id="audio-sr" class="text-white/80">-</span></div>
+          </div>
+        </section>
+
+        <!-- Mode switcher -->
+        <section class="p-5 border-b border-white/10">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">03 · Playhead Mode</label>
+          <div class="grid grid-cols-3 gap-1 mt-2 p-1 bg-white/5 rounded-md">
+            <button id="mode-envelope" class="mode-btn text-[10px] py-2 rounded transition-colors">
+              <i class="fas fa-wave-square mr-1"></i>Envelope
+            </button>
+            <button id="mode-momentum" class="mode-btn text-[10px] py-2 rounded transition-colors">
+              <i class="fas fa-rocket mr-1"></i>Momentum
+            </button>
+            <button id="mode-hand" class="mode-btn text-[10px] py-2 rounded transition-colors">
+              <i class="fas fa-hand mr-1"></i>Hand
+            </button>
+          </div>
+          <p id="mode-desc" class="text-[10px] text-white/40 mt-2 leading-snug">
+            Position tracks audio envelope directly. Loud = open, quiet = closed. Perfect for blooming, breathing, morphing.
+          </p>
+        </section>
+
+        <!-- Hand mode controls -->
+        <section id="panel-hand" class="p-5 border-b border-white/10 space-y-4 hidden">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Hand Controls</label>
+
+          <!-- Enable / permission -->
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-white/70">Camera tracking</span>
+            <button id="hand-enable" class="text-[10px] px-3 py-1.5 border border-white/15 rounded hover:border-white/50">
+              Enable
+            </button>
+          </div>
+          <p id="hand-status" class="text-[10px] text-white/40 leading-snug -mt-2">
+            Pinch thumb + index finger. Opening = scrub forward, closing = scrub backward.
+          </p>
+
+          <!-- Webcam preview with landmark overlay -->
+          <div class="relative rounded-md overflow-hidden bg-black/60 border border-white/10" style="aspect-ratio: 4/3;">
+            <canvas id="hand-preview" class="w-full h-full block"></canvas>
+            <div class="absolute top-1 left-1.5 text-[9px] tracking-widest text-white/40 uppercase pointer-events-none">camera</div>
+            <div id="hand-no-cam" class="absolute inset-0 flex items-center justify-center text-white/30 text-[10px] text-center px-4">
+              Click Enable to allow webcam access
+            </div>
+          </div>
+
+          <!-- Live pinch meter -->
+          <div>
+            <div class="flex justify-between text-[10px] text-white/40 uppercase tracking-widest">
+              <span>Pinch</span><span id="val-pinch-live" class="tabular-nums">0.00</span>
+            </div>
+            <div class="mt-1 h-1.5 bg-white/10 rounded overflow-hidden">
+              <div id="pinch-meter" class="h-full bg-gradient-to-r from-cyan-500 to-blue-500" style="width:0%"></div>
+            </div>
+          </div>
+
+          <!-- Mapping selector -->
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Mapping</span><span id="val-hand-map" class="tabular-nums text-white/90">Velocity</span>
+            </div>
+            <div class="grid grid-cols-2 gap-1 mt-1">
+              <button class="hand-map-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-map="velocity">
+                Velocity (jog)
+              </button>
+              <button class="hand-map-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-map="position">
+                Position (fader)
+              </button>
+            </div>
+            <p class="text-[9px] text-white/30 mt-1 leading-snug">
+              Velocity = pinch motion pushes time forward/back (keeps moving). Position = pinch = absolute scrub point.
+            </p>
+          </div>
+
+          <!-- Calibrate -->
+          <div class="flex items-center justify-between gap-2">
+            <button id="hand-calibrate" class="flex-1 text-[10px] py-2 border border-white/15 hover:border-white/50 rounded">
+              <i class="fas fa-crosshairs mr-1"></i>Calibrate (2s)
+            </button>
+          </div>
+
+          <!-- Sensitivity (velocity mode) -->
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Sensitivity</span><span id="val-hand-sens" class="tabular-nums">2.00</span>
+            </div>
+            <input id="ctrl-hand-sens" type="range" min="0.1" max="8" step="0.05" value="2.0" class="w-full" />
+          </div>
+
+          <!-- Damping (velocity mode) -->
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Damping (velocity mode)</span><span id="val-hand-damp" class="tabular-nums">0.90</span>
+            </div>
+            <input id="ctrl-hand-damp" type="range" min="0.5" max="0.99" step="0.01" value="0.9" class="w-full" />
+          </div>
+
+          <!-- Smooth (position mode) -->
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Smoothing</span><span id="val-hand-smooth" class="tabular-nums">80 ms</span>
+            </div>
+            <input id="ctrl-hand-smooth" type="range" min="0" max="500" step="1" value="80" class="w-full" />
+          </div>
+
+          <!-- Reach / floor -->
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Reach</span><span id="val-hand-reach" class="tabular-nums">100%</span>
+            </div>
+            <input id="ctrl-hand-reach" type="range" min="0.05" max="1" step="0.01" value="1.0" class="w-full" />
+          </div>
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Floor</span><span id="val-hand-floor" class="tabular-nums">0%</span>
+            </div>
+            <input id="ctrl-hand-floor" type="range" min="0" max="0.95" step="0.01" value="0" class="w-full" />
+          </div>
+
+          <!-- Dead zone -->
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Dead zone</span><span id="val-hand-dead" class="tabular-nums">0.02</span>
+            </div>
+            <input id="ctrl-hand-dead" type="range" min="0" max="0.3" step="0.01" value="0.02" class="w-full" />
+          </div>
+
+          <!-- Invert -->
+          <div class="flex items-center gap-2">
+            <input id="ctrl-hand-invert" type="checkbox" class="accent-red-500" />
+            <label for="ctrl-hand-invert" class="text-[11px] text-white/70">Invert (close = forward)</label>
+          </div>
+
+          <!-- Audio-on-top layering -->
+          <div class="pt-2 border-t border-white/10 space-y-3">
+            <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Audio layer (optional)</label>
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Audio snap</span><span id="val-hand-audiosnap" class="tabular-nums">0.00</span>
+              </div>
+              <input id="ctrl-hand-audiosnap" type="range" min="0" max="1" step="0.01" value="0" class="w-full" />
+            </div>
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Audio jitter</span><span id="val-hand-audiojit" class="tabular-nums">0.00</span>
+              </div>
+              <input id="ctrl-hand-audiojit" type="range" min="0" max="1" step="0.01" value="0" class="w-full" />
+            </div>
+            <p class="text-[9px] text-white/30 leading-snug">
+              Adds bass snaps + high-band jitter on top of your hand motion — audio still reacts but the hand is the driver.
+            </p>
+          </div>
+
+          <!-- Two-hand mode (left = playhead, right = blob gestures) -->
+          <div class="pt-2 border-t border-white/10 space-y-3">
+            <div class="flex items-center justify-between">
+              <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Two-hand Mode</label>
+              <label class="inline-flex items-center cursor-pointer">
+                <input id="ctrl-two-hand" type="checkbox" class="accent-red-500" />
+                <span class="ml-2 text-[11px] text-white/70">Enabled</span>
+              </label>
+            </div>
+            <p class="text-[10px] text-white/40 leading-snug -mt-2">
+              <span class="text-red-400">Red hand</span> = playhead (pinch). <span class="text-cyan-400">Cyan hand</span> = blob tracker gestures (appear/hide, palm flip, pinch sensitivity, fist freeze).
+            </p>
+            <div class="flex items-center gap-2">
+              <input id="ctrl-swap-hands" type="checkbox" class="accent-red-500" />
+              <label for="ctrl-swap-hands" class="text-[11px] text-white/70">Swap hands (left-handed)</label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Blob Tracker panel -->
+        <section id="panel-blob" class="p-5 border-b border-white/10 space-y-4">
+          <div class="flex items-center justify-between">
+            <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Blob Tracker</label>
+            <label class="inline-flex items-center cursor-pointer">
+              <input id="ctrl-blob-enabled" type="checkbox" class="accent-cyan-400" />
+              <span class="ml-2 text-[11px] text-white/70">Enabled</span>
+            </label>
+          </div>
+          <p class="text-[10px] text-white/40 leading-snug -mt-2">
+            Motion-based blob detection on the rendered video. Inspired by TouchDesigner blob tracker + mondniles.com.
+          </p>
+
+          <div id="blob-tracker-controls" class="space-y-3 opacity-50 pointer-events-none transition-opacity">
+
+            <!-- Source -->
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Source</span><span id="val-blob-source" class="tabular-nums text-cyan-300/90">Video</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1 mt-1">
+                <button class="blob-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-cyan-400/60" data-src="video">Video</button>
+                <button class="blob-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-cyan-400/60" data-src="webcam">Webcam</button>
+              </div>
+            </div>
+
+            <!-- Overlay style -->
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Overlay style</span><span id="val-blob-style" class="tabular-nums text-cyan-300/90">Circles</span>
+              </div>
+              <div class="grid grid-cols-4 gap-1 mt-1">
+                <button class="blob-style-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-cyan-400/60" data-style="circles">Circles</button>
+                <button class="blob-style-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-cyan-400/60" data-style="hex">Hex</button>
+                <button class="blob-style-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-cyan-400/60" data-style="boxes">Boxes</button>
+                <button class="blob-style-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-cyan-400/60" data-style="trails">Trails</button>
+              </div>
+            </div>
+
+            <!-- Detection sliders -->
+            <div class="pt-2 border-t border-white/5 space-y-3">
+              <label class="text-[9px] tracking-[0.25em] text-white/40 uppercase">Detection</label>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Sensitivity (diff)</span><span id="val-blob-diff" class="tabular-nums">18</span>
+                </div>
+                <input id="ctrl-blob-diff" type="range" min="1" max="80" step="1" value="18" class="w-full" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Min area</span><span id="val-blob-minarea" class="tabular-nums">60</span>
+                </div>
+                <input id="ctrl-blob-minarea" type="range" min="5" max="2000" step="1" value="60" class="w-full" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Max blobs</span><span id="val-blob-maxblobs" class="tabular-nums">40</span>
+                </div>
+                <input id="ctrl-blob-maxblobs" type="range" min="1" max="120" step="1" value="40" class="w-full" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Motion smoothing</span><span id="val-blob-motionsmooth" class="tabular-nums">0.50</span>
+                </div>
+                <input id="ctrl-blob-motionsmooth" type="range" min="0" max="1" step="0.01" value="0.5" class="w-full" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Resolution scale</span><span id="val-blob-resscale" class="tabular-nums">0.50</span>
+                </div>
+                <input id="ctrl-blob-resscale" type="range" min="0.1" max="1" step="0.05" value="0.5" class="w-full" />
+              </div>
+            </div>
+
+            <!-- Look / overlay options -->
+            <div class="pt-2 border-t border-white/5 space-y-3">
+              <label class="text-[9px] tracking-[0.25em] text-white/40 uppercase">Look</label>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Color</span><span id="val-blob-color" class="tabular-nums">#ffffff</span>
+                </div>
+                <input id="ctrl-blob-color" type="color" value="#ffffff" class="w-full h-7 bg-transparent border border-white/15 rounded" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Opacity</span><span id="val-blob-opacity" class="tabular-nums">0.65</span>
+                </div>
+                <input id="ctrl-blob-opacity" type="range" min="0" max="1" step="0.01" value="0.65" class="w-full" />
+              </div>
+              <div>
+                <div class="flex justify-between text-[11px] text-white/70">
+                  <span>Line weight</span><span id="val-blob-lineweight" class="tabular-nums">1.00</span>
+                </div>
+                <input id="ctrl-blob-lineweight" type="range" min="0.25" max="4" step="0.05" value="1" class="w-full" />
+              </div>
+              <div class="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-white/70">
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <input id="ctrl-blob-showids" type="checkbox" class="accent-cyan-400" />IDs
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <input id="ctrl-blob-showxy" type="checkbox" class="accent-cyan-400" />XY
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <input id="ctrl-blob-showmetrics" type="checkbox" class="accent-cyan-400" />Metrics
+                </label>
+                <label class="inline-flex items-center gap-2 cursor-pointer">
+                  <input id="ctrl-blob-connections" type="checkbox" class="accent-cyan-400" />Connections
+                </label>
+              </div>
+            </div>
+
+            <!-- Gesture drive -->
+            <div class="pt-2 border-t border-white/5 space-y-2">
+              <label class="inline-flex items-center gap-2 cursor-pointer">
+                <input id="ctrl-blob-gesture" type="checkbox" class="accent-cyan-400" />
+                <span class="text-[11px] text-white/80">Gesture drive (right hand)</span>
+              </label>
+              <p class="text-[10px] text-white/40 leading-snug">
+                Right hand present → tracker on. Each pinch (thumb + index close → open) cycles style: Circles → Hex → Boxes → Trails. Fist freezes blobs.
+              </p>
+            </div>
+
+            <!-- Live readout -->
+            <div class="mt-2 p-2 rounded border border-cyan-500/20 bg-cyan-500/5 space-y-1">
+              <div class="flex justify-between text-[9px] tracking-[0.25em] text-cyan-300/70 uppercase">
+                <span>Live</span>
+                <span id="val-blob-status" class="text-cyan-200/90">idle</span>
+              </div>
+              <div class="grid grid-cols-3 gap-x-2 text-[10px] text-white/50 tabular-nums">
+                <div>Blobs <span id="val-blob-count" class="text-cyan-200/90">0</span></div>
+                <div>Hand <span id="val-blob-hand" class="text-cyan-200/90">—</span></div>
+                <div>Freeze <span id="val-blob-freeze" class="text-cyan-200/90">—</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Envelope mode controls -->
+        <section id="panel-envelope" class="p-5 border-b border-white/10 space-y-4">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Envelope Controls</label>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Source band</span><span id="val-env-src" class="tabular-nums text-white/90">RMS</span>
+            </div>
+            <div class="grid grid-cols-5 gap-1 mt-1">
+              <button class="env-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-src="rms">RMS</button>
+              <button class="env-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-src="bass">Bass</button>
+              <button class="env-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-src="mid">Mid</button>
+              <button class="env-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-src="high">High</button>
+              <button class="env-src-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-src="mix">Mix</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Attack</span><span id="val-env-attack" class="tabular-nums">80 ms</span>
+            </div>
+            <input id="ctrl-env-attack" type="range" min="1" max="500" step="1" value="80" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Release</span><span id="val-env-release" class="tabular-nums">300 ms</span>
+            </div>
+            <input id="ctrl-env-release" type="range" min="10" max="2000" step="1" value="300" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Reach (peak frame)</span><span id="val-env-reach" class="tabular-nums">100%</span>
+            </div>
+            <input id="ctrl-env-reach" type="range" min="0.05" max="1" step="0.01" value="1.0" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Floor (rest frame)</span><span id="val-env-floor" class="tabular-nums">0%</span>
+            </div>
+            <input id="ctrl-env-floor" type="range" min="0" max="0.95" step="0.01" value="0" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Sensitivity</span><span id="val-env-gain" class="tabular-nums">1.20</span>
+            </div>
+            <input id="ctrl-env-gain" type="range" min="0.1" max="5" step="0.01" value="1.2" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Curve (punch)</span><span id="val-env-curve" class="tabular-nums">1.20</span>
+            </div>
+            <input id="ctrl-env-curve" type="range" min="0.3" max="3" step="0.01" value="1.2" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Jitter (hats/snares)</span><span id="val-env-jitter" class="tabular-nums">0.00</span>
+            </div>
+            <input id="ctrl-env-jitter" type="range" min="0" max="1" step="0.01" value="0" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Snap (bass hits)</span><span id="val-env-snap" class="tabular-nums">0.00</span>
+            </div>
+            <input id="ctrl-env-snap" type="range" min="0" max="1" step="0.01" value="0" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Hold &amp; snap-back</span><span id="val-env-hold" class="tabular-nums">0.00</span>
+            </div>
+            <input id="ctrl-env-hold" type="range" min="0" max="1" step="0.01" value="0" class="w-full" />
+          </div>
+
+          <!-- live envelope meter -->
+          <div>
+            <div class="flex justify-between text-[10px] text-white/40 uppercase tracking-widest">
+              <span>Envelope</span><span id="val-env-live" class="tabular-nums">0.00</span>
+            </div>
+            <div class="mt-1 h-1.5 bg-white/10 rounded overflow-hidden">
+              <div id="env-meter" class="h-full bg-gradient-to-r from-red-500 to-orange-400" style="width:0%"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Segment Roam -->
+        <section id="panel-roam" class="p-5 border-b border-white/10 space-y-4">
+          <div class="flex items-center justify-between">
+            <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Segment Roam</label>
+            <label class="inline-flex items-center cursor-pointer">
+              <input id="ctrl-roam-enabled" type="checkbox" class="accent-red-500" />
+              <span class="ml-2 text-[11px] text-white/70">Enabled</span>
+            </label>
+          </div>
+          <p class="text-[10px] text-white/40 leading-snug -mt-2">
+            Audio energy still scrubs the playhead, but the floor→reach <em>window itself</em>
+            jumps to a new range on each trigger — so every beat visits a different part of the clip.
+            Segments can go backwards for reverse-scrub.
+          </p>
+
+          <div id="roam-controls" class="space-y-4 opacity-50 pointer-events-none transition-opacity">
+
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Trigger</span><span id="val-roam-trigger" class="tabular-nums text-white/90">Transient</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1 mt-1">
+                <button class="roam-trig-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-trig="transient">Transient</button>
+                <button class="roam-trig-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-trig="tempo">Tempo</button>
+                <button class="roam-trig-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-trig="random">Random</button>
+              </div>
+            </div>
+
+            <div id="roam-bpm-wrap" class="hidden">
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>BPM</span><span id="val-roam-bpm" class="tabular-nums">120</span>
+              </div>
+              <input id="ctrl-roam-bpm" type="range" min="30" max="240" step="1" value="120" class="w-full" />
+            </div>
+
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Segment size</span><span id="val-roam-size" class="tabular-nums">25%</span>
+              </div>
+              <input id="ctrl-roam-size" type="range" min="0.03" max="0.8" step="0.01" value="0.25" class="w-full" />
+            </div>
+
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Size jitter</span><span id="val-roam-sizejit" class="tabular-nums">0.50</span>
+              </div>
+              <input id="ctrl-roam-sizejit" type="range" min="0" max="1" step="0.01" value="0.5" class="w-full" />
+            </div>
+
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Direction</span><span id="val-roam-dir" class="tabular-nums text-white/90">Any</span>
+              </div>
+              <div class="grid grid-cols-3 gap-1 mt-1">
+                <button class="roam-dir-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-dir="forward">→ Fwd</button>
+                <button class="roam-dir-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-dir="backward">← Back</button>
+                <button class="roam-dir-btn text-[10px] py-1.5 border border-white/15 rounded hover:border-white/50" data-dir="any">↔ Any</button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Continuity</span><span id="val-roam-cont" class="tabular-nums">0.35</span>
+              </div>
+              <input id="ctrl-roam-cont" type="range" min="0" max="1" step="0.01" value="0.35" class="w-full" />
+              <p class="text-[9px] text-white/30 mt-1 leading-snug">0 = each beat jumps anywhere · 1 = segments chain together</p>
+            </div>
+
+            <div>
+              <div class="flex justify-between text-[11px] text-white/70">
+                <span>Glide</span><span id="val-roam-smooth" class="tabular-nums">80 ms</span>
+              </div>
+              <input id="ctrl-roam-smooth" type="range" min="0" max="500" step="1" value="80" class="w-full" />
+              <p class="text-[9px] text-white/30 mt-1 leading-snug">0 = hard cut to new segment · high = smooth slide</p>
+            </div>
+
+            <!-- live segment viz -->
+            <div>
+              <div class="flex justify-between text-[10px] text-white/40 uppercase tracking-widest">
+                <span>Current segment</span><span id="val-seg-live" class="tabular-nums">—</span>
+              </div>
+              <div class="mt-1 relative h-2 bg-white/10 rounded overflow-hidden">
+                <div id="seg-indicator" class="absolute h-full bg-gradient-to-r from-cyan-500 to-blue-500" style="left:0%; width:0%"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Momentum mode controls -->
+        <section id="panel-momentum" class="p-5 border-b border-white/10 space-y-4 hidden">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Momentum Controls</label>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Bass drive</span><span id="val-bass" class="tabular-nums">1.40</span>
+            </div>
+            <input id="ctrl-bass" type="range" min="0" max="3" step="0.01" value="1.4" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Mid drive</span><span id="val-mid" class="tabular-nums">0.60</span>
+            </div>
+            <input id="ctrl-mid" type="range" min="0" max="3" step="0.01" value="0.6" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>High jitter</span><span id="val-high" class="tabular-nums">0.35</span>
+            </div>
+            <input id="ctrl-high" type="range" min="0" max="2" step="0.01" value="0.35" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Damping (decay)</span><span id="val-damp" class="tabular-nums">0.88</span>
+            </div>
+            <input id="ctrl-damp" type="range" min="0.5" max="0.99" step="0.01" value="0.88" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Elastic return</span><span id="val-elastic" class="tabular-nums">0.15</span>
+            </div>
+            <input id="ctrl-elastic" type="range" min="0" max="1" step="0.01" value="0.15" class="w-full" />
+          </div>
+
+          <div class="flex items-center gap-2 pt-1">
+            <input id="ctrl-loop" type="checkbox" checked class="accent-red-500" />
+            <label for="ctrl-loop" class="text-[11px] text-white/70">Loop playhead through video</label>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <input id="ctrl-scrub" type="checkbox" checked class="accent-red-500" />
+            <label for="ctrl-scrub" class="text-[11px] text-white/70">Backward scrub on decay</label>
+          </div>
+        </section>
+
+        <!-- Render controls (shared) -->
+        <section class="p-5 border-b border-white/10 space-y-4">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Render</label>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Motion trail</span><span id="val-trail" class="tabular-nums">0.30</span>
+            </div>
+            <input id="ctrl-trail" type="range" min="0" max="0.95" step="0.01" value="0.30" class="w-full" />
+          </div>
+
+          <div>
+            <div class="flex justify-between text-[11px] text-white/70">
+              <span>Frame blend</span><span id="val-blend" class="tabular-nums">1.00</span>
+            </div>
+            <input id="ctrl-blend" type="range" min="0" max="1" step="0.01" value="1.0" class="w-full" />
+          </div>
+        </section>
+
+        <!-- Presets -->
+        <section class="p-5 border-b border-white/10">
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase">Presets — Envelope</label>
+          <div class="grid grid-cols-2 gap-2 mt-2">
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="twitch">
+              <i class="fas fa-bolt mr-1"></i>Twitch
+            </button>
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="bloom">
+              <i class="fas fa-spa mr-1"></i>Bloom
+            </button>
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="breath">
+              <i class="fas fa-wind mr-1"></i>Breath
+            </button>
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="pulse">
+              <i class="fas fa-heart mr-1"></i>Pulse
+            </button>
+            <button class="preset-btn col-span-2 text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="roam">
+              <i class="fas fa-shuffle mr-1"></i>Roam (segment jumper)
+            </button>
+          </div>
+
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase block mt-4">Presets — Momentum</label>
+          <div class="grid grid-cols-3 gap-2 mt-2">
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="smooth">
+              <i class="fas fa-water mr-1"></i>Smooth
+            </button>
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="punch">
+              <i class="fas fa-fist-raised mr-1"></i>Punch
+            </button>
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="dj">
+              <i class="fas fa-record-vinyl mr-1"></i>DJ
+            </button>
+          </div>
+
+          <label class="text-[10px] tracking-[0.25em] text-white/40 uppercase block mt-4">Presets — Hand</label>
+          <div class="grid grid-cols-2 gap-2 mt-2">
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="jog">
+              <i class="fas fa-record-vinyl mr-1"></i>Jog (velocity)
+            </button>
+            <button class="preset-btn text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="scrubber">
+              <i class="fas fa-sliders mr-1"></i>Scrubber
+            </button>
+            <button class="preset-btn col-span-2 text-[11px] py-2 border border-white/15 hover:border-white/50 rounded" data-preset="handAudio">
+              <i class="fas fa-hand-holding-droplet mr-1"></i>Hand + Audio jitter
+            </button>
+          </div>
+        </section>
+
+      </aside>
+
+      <!-- Stage -->
+      <section class="flex-1 flex flex-col min-w-0 bg-black">
+
+        <!-- Canvas holder -->
+        <div class="flex-1 relative flex items-center justify-center overflow-hidden" id="stage">
+          <canvas id="gl-canvas" class="max-w-full max-h-full"></canvas>
+
+          <!-- 2D overlay for blob crosshair, positioned exactly over gl-canvas -->
+          <canvas id="overlay-canvas" class="absolute pointer-events-none" style="left:0;top:0"></canvas>
+
+          <!-- Idle overlay -->
+          <div id="idle-overlay" class="absolute inset-0 flex flex-col items-center justify-center text-white/30 pointer-events-none">
+            <i class="fas fa-tv text-6xl mb-4"></i>
+            <p class="tracking-[0.3em] text-xs uppercase">Upload video + audio to begin</p>
+          </div>
+
+          <!-- HUD overlay -->
+          <div id="hud" class="absolute top-3 left-3 text-[10px] text-white/40 tabular-nums space-y-0.5 pointer-events-none">
+            <div>MODE <span id="hud-mode" class="text-white/80">envelope</span></div>
+            <div>PLAYHEAD <span id="hud-pos" class="text-white/80">0000</span> / <span id="hud-total">0000</span></div>
+            <div>ENV <span id="hud-env" class="text-white/80">0.00</span></div>
+            <div>BASS <span id="hud-bass" class="text-white/80">0.00</span></div>
+            <div>MID  <span id="hud-mid"  class="text-white/80">0.00</span></div>
+            <div>HIGH <span id="hud-high" class="text-white/80">0.00</span></div>
+          </div>
+        </div>
+
+        <!-- Waveform / timeline -->
+        <div class="h-28 border-t border-white/10 bg-black/80 relative flex flex-col">
+          <canvas id="wave-canvas" class="absolute inset-0 w-full h-full"></canvas>
+          <div class="relative flex items-center justify-between px-4 py-2 z-10 bg-gradient-to-b from-black/80 to-transparent">
+            <div class="flex items-center gap-3">
+              <button id="play-btn" class="w-9 h-9 rounded-full bg-white text-black flex items-center justify-center hover:scale-105 transition-transform disabled:opacity-30" disabled>
+                <i class="fas fa-play text-xs"></i>
+              </button>
+              <button id="stop-btn" class="w-9 h-9 rounded-full border border-white/30 flex items-center justify-center hover:border-white/80 transition-colors disabled:opacity-30" disabled>
+                <i class="fas fa-stop text-xs"></i>
+              </button>
+              <div class="text-[11px] text-white/60 tabular-nums">
+                <span id="time-cur">0:00.0</span> / <span id="time-tot">0:00.0</span>
+              </div>
+            </div>
+            <div class="text-[10px] tracking-[0.2em] uppercase text-white/40">
+              Timeline reacts to audio envelope
+            </div>
+          </div>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="/static/app.js"></script>
+<script src="https://www.genspark.ai/sandbox_inspect.js"></script>
+</body>
 </html>
