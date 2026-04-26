@@ -141,7 +141,7 @@ function formatVal(v, step) {
   const decimals = step >= 1 ? 0 : (step >= 0.1 ? 1 : (step >= 0.01 ? 2 : 3));
   return Number(v).toFixed(decimals);
 }
-function applyPreset(p) {
+function applyPreset(p, name) {
   for (const k of Object.keys(p)) {
     state[k] = p[k];
     // sync UI
@@ -152,6 +152,8 @@ function applyPreset(p) {
       input.value = p[k];
       const step = parseFloat(input.step);
       out.textContent = formatVal(p[k], step);
+      knobHost.classList.add("flash");
+      setTimeout(() => knobHost.classList.remove("flash"), 600);
     }
     // sync any matching checkbox by id
     const chk = document.getElementById(k);
@@ -161,6 +163,11 @@ function applyPreset(p) {
         b.classList.toggle("active", b.dataset.mode === p[k]);
       });
     }
+  }
+  if (name) {
+    setStatus(`preset · ${name}`);
+    document.body.classList.add("preset-flash");
+    setTimeout(() => document.body.classList.remove("preset-flash"), 700);
   }
 }
 
@@ -197,10 +204,10 @@ document.querySelectorAll("#modeSeg .seg-btn").forEach((btn) => {
 $("blobStyle").addEventListener("change", (e) => state.blobStyle = e.target.value);
 $("roamDir").addEventListener("change", (e) => state.roamDir = e.target.value);
 
-$("presetBloom").addEventListener("click", () => applyPreset(PRESETS.bloom));
-$("presetEnvelope").addEventListener("click", () => applyPreset(PRESETS.envelope));
-$("presetMomentum").addEventListener("click", () => applyPreset(PRESETS.momentum));
-$("presetHand").addEventListener("click", () => applyPreset(PRESETS.hand));
+$("presetBloom").addEventListener("click", () => applyPreset(PRESETS.bloom, "Bloom"));
+$("presetEnvelope").addEventListener("click", () => applyPreset(PRESETS.envelope, "Envelope"));
+$("presetMomentum").addEventListener("click", () => applyPreset(PRESETS.momentum, "Momentum"));
+$("presetHand").addEventListener("click", () => applyPreset(PRESETS.hand, "Hand"));
 $("resetAll").addEventListener("click", () => {
   rt.playhead = 0; rt.velocity = 0; rt.envelope = 0;
   if (video.duration) video.currentTime = 0;
