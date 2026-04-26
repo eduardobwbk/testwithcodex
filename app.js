@@ -63,6 +63,10 @@ const rt = {
   rightFist: false,
   rightPinchPrev: 0,
   rightPinchedAt: 0,
+  // frame pre-cache for flicker-free scrubbing
+  frameCache: null,
+  cacheReady: false,
+  cacheW: 0, cacheH: 0,
 };
 
 // presets
@@ -256,9 +260,77 @@ setupDropzone("dzVideo", "videoFile", (file) => {
     rt.videoLoaded = true;
     $("dzVideo").classList.add("loaded");
     $("dzVideo").querySelector(".dz-sub").textContent = file.name;
-    setStatus("video loaded");
+    setStatus("video loaded · caching frames…");
+    precacheFrames().catch((e) => {
+      console.warn("frame cache failed", e);
+      setStatus("frame cache failed — will seek live (may flicker)");
+    });
   }, { once: true });
 });
+
+// Pre-decode every frame of the video into ImageBitmaps so we can scrub
+// without ever calling video.currentTime at render time. Eliminates flicker.
+async function precacheFrames() {
+  // wipe any prior cache
+  if (rt.frameCache) {
+    for (const b of rt.frameCache) try { b.close && b.close(); } catch (_) {}
+  }
+  rt.frameCache = null;
+  rt.cacheReady = false;
+
+  const duration = video.duration;
+  if (!isFinite(duration) || duration <= 0) return;
+
+  // Cache rate: ~24fps if short, scale down for longer clips so we stay under
+  // ~900 frames total (memory safety).
+  const targetFps = 24;
+  const maxFrames = 900;
+  const totalRaw = Math.ceil(duration * targetFps);
+  const total = Math.min(maxFrames, totalRaw);
+  const fps = total / duration;
+
+  // Size cap — 480px wide is plenty for a 1080p stage canvas.
+  const maxW = 480;
+  const aspect = video.videoHeight / video.videoWidth;
+  const w = Math.min(maxW, video.videoWidth);
+  const h = Math.round(w * aspect);
+
+  const tmp = document.createElement("canvas");
+  tmp.width = w; tmp.height = h;
+  const tmpCtx = tmp.getContext("2d");
+
+  const cache = new Array(total);
+  video.pause();
+
+  for (let i = 0; i < total; i++) {
+    const t = (i + 0.5) / fps;
+    await seekTo(Math.min(duration - 0.001, t));
+    tmpCtx.drawImage(video, 0, 0, w, h);
+    cache[i] = await createImageBitmap(tmp);
+    if (i % 10 === 0) {
+      setStatus(`caching ${i + 1}/${total}`);
+      await new Promise(r => requestAnimationFrame(r));
+    }
+  }
+
+  rt.frameCache = cache;
+  rt.cacheReady = true;
+  rt.cacheW = w; rt.cacheH = h;
+  setStatus(`cache ready · ${total} frames`);
+}
+
+function seekTo(t) {
+  return new Promise((resolve) => {
+    let done = false;
+    const onSeeked = () => { if (!done) { done = true; cleanup(); resolve(); } };
+    const cleanup = () => video.removeEventListener("seeked", onSeeked);
+    video.addEventListener("seeked", onSeeked);
+    try { video.currentTime = t; }
+    catch (_) { cleanup(); resolve(); }
+    // Hard fallback in case 'seeked' doesn't fire
+    setTimeout(() => { if (!done) { done = true; cleanup(); resolve(); } }, 1500);
+  });
+}
 
 setupDropzone("dzAudio", "audioFile", (file) => {
   loadAudioFile(file);
@@ -542,8 +614,9 @@ function updatePlayhead(dt) {
     if (rt.playhead < 0) { rt.playhead = 0; rt.velocity = 0; }
   }
 
-  // Apply to <video> — threshold scales so slow movement seeks every ~80ms (1 frame)
-  if (rt.videoLoaded && video.duration) {
+  // Apply to <video> only when frame cache is NOT ready (live-seek fallback).
+  // Once cache is ready we draw cached frames directly — no seeking, no flicker.
+  if (!rt.cacheReady && rt.videoLoaded && video.duration) {
     const t = rt.playhead * video.duration;
     const drift = Math.abs(video.currentTime - t);
     const threshold = state.mode === "audio" ? 0.06 : 0.04;
@@ -648,15 +721,26 @@ const blobCtx = blobCanvas.getContext("2d", { willReadFrequently: true });
 function detectBlobs() {
   if (!rt.videoLoaded) return;
   if (!state.blobOn || rt.blobFrozen) return;
-  if (video.readyState < 2) return;
+  // pick the source: cached bitmap if available, else live video
+  let src = null, srcW = 0, srcH = 0;
+  if (rt.cacheReady && rt.frameCache && rt.frameCache.length) {
+    const idx = Math.max(0, Math.min(rt.frameCache.length - 1,
+      Math.floor(rt.playhead * rt.frameCache.length)));
+    src = rt.frameCache[idx];
+    srcW = src.width; srcH = src.height;
+  } else if (video.readyState >= 2) {
+    src = video; srcW = video.videoWidth; srcH = video.videoHeight;
+  } else {
+    return;
+  }
   const scale = state.bScale;
-  const w = Math.max(32, Math.floor(video.videoWidth * scale));
-  const h = Math.max(32, Math.floor(video.videoHeight * scale));
+  const w = Math.max(32, Math.floor(srcW * scale));
+  const h = Math.max(32, Math.floor(srcH * scale));
   if (blobCanvas.width !== w || blobCanvas.height !== h) {
     blobCanvas.width = w; blobCanvas.height = h;
     rt.prevGray = null;
   }
-  blobCtx.drawImage(video, 0, 0, w, h);
+  blobCtx.drawImage(src, 0, 0, w, h);
   const img = blobCtx.getImageData(0, 0, w, h);
   const len = w * h;
   const gray = new Uint8ClampedArray(len);
@@ -780,7 +864,19 @@ function drawFrame() {
   outCtx.fillStyle = `rgba(0,0,0,${1 - trail})`;
   outCtx.fillRect(0, 0, w, h);
 
-  if (rt.videoLoaded && video.readyState >= 2) {
+  if (rt.cacheReady && rt.frameCache && rt.frameCache.length) {
+    // Draw the cached frame closest to playhead — zero seeking, zero flicker.
+    const idx = Math.max(0, Math.min(rt.frameCache.length - 1,
+      Math.floor(rt.playhead * rt.frameCache.length)));
+    const bmp = rt.frameCache[idx];
+    const vw = bmp.width, vh = bmp.height;
+    const r = Math.min(w / vw, h / vh);
+    const dw = vw * r, dh = vh * r;
+    const dx = (w - dw) / 2, dy = (h - dh) / 2;
+    outCtx.globalAlpha = state.rBlend * state.rGain;
+    outCtx.drawImage(bmp, dx, dy, dw, dh);
+    outCtx.globalAlpha = 1;
+  } else if (rt.videoLoaded && video.readyState >= 2) {
     const vw = video.videoWidth, vh = video.videoHeight;
     if (vw > 0) {
       const r = Math.min(w / vw, h / vh);
