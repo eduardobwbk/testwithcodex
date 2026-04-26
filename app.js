@@ -254,9 +254,16 @@ function setupDropzone(id, inputId, onFile) {
 
 setupDropzone("dzVideo", "videoFile", (file) => {
   const url = URL.createObjectURL(file);
+  // Wipe any previous cache and listeners before loading the new file.
+  rt.cacheReady = false;
+  if (rt.frameCache) {
+    for (const b of rt.frameCache) try { b.close && b.close(); } catch (_) {}
+    rt.frameCache = null;
+  }
   video.src = url;
   video.load();
-  video.addEventListener("loadedmetadata", () => {
+
+  const onLoaded = () => {
     rt.videoLoaded = true;
     $("dzVideo").classList.add("loaded");
     $("dzVideo").querySelector(".dz-sub").textContent = file.name;
@@ -265,7 +272,21 @@ setupDropzone("dzVideo", "videoFile", (file) => {
       console.warn("frame cache failed", e);
       setStatus("frame cache failed — will seek live (may flicker)");
     });
-  }, { once: true });
+    cleanup();
+  };
+  const onError = () => {
+    rt.videoLoaded = false;
+    $("dzVideo").classList.remove("loaded");
+    $("dzVideo").querySelector(".dz-sub").textContent = "Unsupported codec — try H.264 MP4";
+    setStatus("video unsupported · convert to H.264 MP4 (HandBrake)");
+    cleanup();
+  };
+  const cleanup = () => {
+    video.removeEventListener("loadedmetadata", onLoaded);
+    video.removeEventListener("error", onError);
+  };
+  video.addEventListener("loadedmetadata", onLoaded, { once: true });
+  video.addEventListener("error", onError, { once: true });
 });
 
 // Pre-decode every frame of the video into ImageBitmaps so we can scrub
