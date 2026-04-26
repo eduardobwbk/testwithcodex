@@ -291,6 +291,10 @@ setupDropzone("dzVideo", "videoFile", (file) => {
 
 // Pre-decode every frame of the video into ImageBitmaps so we can scrub
 // without ever calling video.currentTime at render time. Eliminates flicker.
+//
+// Strategy: play the video and capture frames via requestVideoFrameCallback.
+// rVFC fires once per decoded frame on the real timeline — no seeking, very
+// fast, and respects rotation metadata on phone-recorded clips.
 async function precacheFrames() {
   // wipe any prior cache
   if (rt.frameCache) {
@@ -302,42 +306,78 @@ async function precacheFrames() {
   const duration = video.duration;
   if (!isFinite(duration) || duration <= 0) return;
 
-  // Cache rate: ~24fps if short, scale down for longer clips so we stay under
-  // ~900 frames total (memory safety).
-  const targetFps = 24;
-  const maxFrames = 900;
-  const totalRaw = Math.ceil(duration * targetFps);
-  const total = Math.min(maxFrames, totalRaw);
-  const fps = total / duration;
+  // Adaptive cache fps so memory stays bounded on longer clips.
+  // Sub-frame cross-fade in drawFrame masks the lower rate visually.
+  const targetFps =
+    duration <= 20 ? 30 :
+    duration <= 30 ? 28 :
+    duration <= 40 ? 24 : 20;
+  const maxFrames = 1200;
+  const totalEst = Math.min(maxFrames, Math.ceil(duration * targetFps));
+  const minStep = 1 / targetFps;
 
-  // Size cap — 480px wide is plenty for a 1080p stage canvas.
-  const maxW = 480;
+  // Cache resolution cap — 720px wide is sharp enough for any stage size,
+  // and keeps memory predictable (~150 MB for 50s of 720x405 RGBA).
+  const maxW = 720;
   const aspect = video.videoHeight / video.videoWidth;
   const w = Math.min(maxW, video.videoWidth);
   const h = Math.round(w * aspect);
 
   const tmp = document.createElement("canvas");
   tmp.width = w; tmp.height = h;
-  const tmpCtx = tmp.getContext("2d");
+  const tmpCtx = tmp.getContext("2d", { alpha: false });
 
-  const cache = new Array(total);
-  video.pause();
+  const cache = [];
+  let lastT = -1;
+  const hardStop = Math.min(duration, 50); // 50s cap
 
-  for (let i = 0; i < total; i++) {
-    const t = (i + 0.5) / fps;
-    await seekTo(Math.min(duration - 0.001, t));
-    tmpCtx.drawImage(video, 0, 0, w, h);
-    cache[i] = await createImageBitmap(tmp);
-    if (i % 10 === 0) {
-      setStatus(`caching ${i + 1}/${total}`);
-      await new Promise(r => requestAnimationFrame(r));
+  // Use rVFC if available; fall back to seek-based on older browsers.
+  if ("requestVideoFrameCallback" in HTMLVideoElement.prototype) {
+    video.muted = true;
+    await new Promise((resolve) => {
+      const step = async (now, metadata) => {
+        const t = metadata.mediaTime;
+        if (t - lastT >= minStep - 0.001 && cache.length < maxFrames && t <= hardStop) {
+          tmpCtx.drawImage(video, 0, 0, w, h);
+          try {
+            cache.push(await createImageBitmap(tmp));
+            lastT = t;
+            if (cache.length % 6 === 0) {
+              setStatus(`caching ${cache.length}/${totalEst}`);
+            }
+          } catch (_) { /* skip frame */ }
+        }
+        if (video.ended || cache.length >= maxFrames || t >= hardStop) {
+          resolve();
+        } else {
+          video.requestVideoFrameCallback(step);
+        }
+      };
+      video.requestVideoFrameCallback(step);
+      video.addEventListener("ended", () => resolve(), { once: true });
+      video.play().catch(() => resolve());
+    });
+    try { video.pause(); } catch (_) {}
+    try { video.currentTime = 0; } catch (_) {}
+  } else {
+    // Fallback: explicit seek loop (slower, may stutter mid-decode)
+    video.pause();
+    for (let i = 0; i < totalEst; i++) {
+      const t = (i + 0.5) / targetFps;
+      await seekTo(Math.min(duration - 0.001, t));
+      tmpCtx.drawImage(video, 0, 0, w, h);
+      cache.push(await createImageBitmap(tmp));
+      if (i % 10 === 0) {
+        setStatus(`caching ${i + 1}/${totalEst}`);
+        await new Promise(r => requestAnimationFrame(r));
+      }
     }
   }
 
   rt.frameCache = cache;
   rt.cacheReady = true;
   rt.cacheW = w; rt.cacheH = h;
-  setStatus(`cache ready · ${total} frames`);
+  setStatus(`cache ready · ${cache.length} frames`);
 }
 
 function seekTo(t) {
@@ -745,8 +785,8 @@ function detectBlobs() {
   // pick the source: cached bitmap if available, else live video
   let src = null, srcW = 0, srcH = 0;
   if (rt.cacheReady && rt.frameCache && rt.frameCache.length) {
-    const idx = Math.max(0, Math.min(rt.frameCache.length - 1,
-      Math.floor(rt.playhead * rt.frameCache.length)));
+    const N = rt.frameCache.length;
+    const idx = Math.max(0, Math.min(N - 1, Math.floor(rt.playhead * (N - 1))));
     src = rt.frameCache[idx];
     srcW = src.width; srcH = src.height;
   } else if (video.readyState >= 2) {
@@ -886,16 +926,25 @@ function drawFrame() {
   outCtx.fillRect(0, 0, w, h);
 
   if (rt.cacheReady && rt.frameCache && rt.frameCache.length) {
-    // Draw the cached frame closest to playhead — zero seeking, zero flicker.
-    const idx = Math.max(0, Math.min(rt.frameCache.length - 1,
-      Math.floor(rt.playhead * rt.frameCache.length)));
-    const bmp = rt.frameCache[idx];
-    const vw = bmp.width, vh = bmp.height;
+    // Cross-fade between two adjacent cached frames using the fractional
+    // playhead position. Even at 20–24fps cache, this looks like 60fps motion.
+    const N = rt.frameCache.length;
+    const frac = Math.max(0, Math.min(N - 1, rt.playhead * (N - 1)));
+    const i0 = Math.floor(frac);
+    const i1 = Math.min(N - 1, i0 + 1);
+    const blend = frac - i0;
+    const a = rt.frameCache[i0], b = rt.frameCache[i1];
+    const vw = a.width, vh = a.height;
     const r = Math.min(w / vw, h / vh);
     const dw = vw * r, dh = vh * r;
     const dx = (w - dw) / 2, dy = (h - dh) / 2;
-    outCtx.globalAlpha = state.rBlend * state.rGain;
-    outCtx.drawImage(bmp, dx, dy, dw, dh);
+    const baseAlpha = state.rBlend * state.rGain;
+    outCtx.globalAlpha = baseAlpha;
+    outCtx.drawImage(a, dx, dy, dw, dh);
+    if (i0 !== i1 && blend > 0) {
+      outCtx.globalAlpha = baseAlpha * blend;
+      outCtx.drawImage(b, dx, dy, dw, dh);
+    }
     outCtx.globalAlpha = 1;
   } else if (rt.videoLoaded && video.readyState >= 2) {
     const vw = video.videoWidth, vh = video.videoHeight;
