@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hand & Audio Reactive Playhead</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="dot"></span>
+          <span>HAND × AUDIO REACTIVE PLAYHEAD</span>
+        </div>
+        <div class="status" id="status">idle</div>
+        <div class="topbar-actions">
+          <button id="presetEnvelope" class="ghost">Preset · Envelope</button>
+          <button id="presetMomentum" class="ghost">Preset · Momentum</button>
+          <button id="presetHand" class="ghost">Preset · Hand</button>
+          <button id="resetAll" class="ghost danger">Reset</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <!-- Stage -->
+        <section class="stage">
+          <div class="stage-canvas">
+            <canvas id="output"></canvas>
+            <canvas id="overlay"></canvas>
+            <video id="video" playsinline muted></video>
+            <video id="webcam" playsinline muted autoplay></video>
+            <div class="hud" id="hud">
+              <div class="hud-row"><span>playhead</span><span id="hudPlayhead">0%</span></div>
+              <div class="hud-row"><span>pinch</span><span id="hudPinch">—</span></div>
+              <div class="hud-row"><span>env</span><span id="hudEnv">0.00</span></div>
+              <div class="hud-row"><span>fps</span><span id="hudFps">0</span></div>
+            </div>
+            <div class="dropzones">
+              <label class="dz" id="dzVideo">
+                <input type="file" id="videoFile" accept="video/*" hidden />
+                <div class="dz-title">VIDEO SOURCE</div>
+                <div class="dz-sub">Drop or click — mp4 / webm</div>
+              </label>
+              <label class="dz" id="dzAudio">
+                <input type="file" id="audioFile" accept="audio/*" hidden />
+                <div class="dz-title">AUDIO TRACK</div>
+                <div class="dz-sub">Drop or click — or use mic</div>
+                <button id="micBtn" class="mic">🎤 Mic</button>
+              </label>
+            </div>
+            <div class="transport">
+              <button id="playBtn" class="primary">▶︎ Play</button>
+              <button id="loopBtn" class="ghost">Loop</button>
+              <input type="range" id="scrub" min="0" max="1000" value="0" />
+              <span id="time">0:00 / 0:00</span>
+            </div>
+          </div>
+
+          <aside class="cam">
+            <div class="cam-title">CAMERA</div>
+            <canvas id="camPreview"></canvas>
+            <button id="camBtn" class="primary">Enable Camera</button>
+            <div class="cam-meta" id="camMeta">no hands</div>
+          </aside>
+        </section>
+
+        <!-- Right column: controls -->
+        <section class="controls" id="controls">
+          <!-- Playhead Mode -->
+          <div class="panel">
+            <div class="panel-title">PLAYHEAD MODE</div>
+            <div class="seg" id="modeSeg">
+              <button data-mode="position" class="seg-btn active">Position</button>
+              <button data-mode="velocity" class="seg-btn">Velocity</button>
+            </div>
+            <div class="panel-row">
+              <label>Loop</label>
+              <input type="checkbox" id="loopChk" checked />
+            </div>
+            <div class="panel-row">
+              <label>Allow Backward</label>
+              <input type="checkbox" id="backwardChk" checked />
+            </div>
+          </div>
+
+          <!-- Hand Controls -->
+          <div class="panel">
+            <div class="panel-title">HAND CONTROLS</div>
+            <div class="panel-row">
+              <label>Two-Hand Mode</label>
+              <input type="checkbox" id="twoHand" />
+            </div>
+            <div class="panel-row">
+              <label>Invert (close = forward)</label>
+              <input type="checkbox" id="invertPinch" />
+            </div>
+            <div data-knob="hSensitivity" data-min="0.1" data-max="5" data-step="0.05" data-value="2.0" data-label="Sensitivity"></div>
+            <div data-knob="hDamping" data-min="0" data-max="1" data-step="0.01" data-value="0.90" data-label="Damping"></div>
+            <div data-knob="hSmooth" data-min="0" data-max="400" data-step="5" data-value="80" data-label="Smoothing (ms)"></div>
+            <div data-knob="hReach" data-min="0" data-max="1" data-step="0.01" data-value="1.00" data-label="Reach"></div>
+            <div data-knob="hFloor" data-min="0" data-max="1" data-step="0.01" data-value="0.00" data-label="Floor"></div>
+            <div data-knob="hDead" data-min="0" data-max="0.2" data-step="0.005" data-value="0.02" data-label="Dead Zone"></div>
+          </div>
+
+          <!-- Envelope -->
+          <div class="panel">
+            <div class="panel-title">AUDIO ENVELOPE</div>
+            <div class="panel-row">
+              <label>Audio Drives Playhead</label>
+              <input type="checkbox" id="audioDrives" checked />
+            </div>
+            <div data-knob="eAttack" data-min="1" data-max="500" data-step="1" data-value="80" data-label="Attack (ms)"></div>
+            <div data-knob="eRelease" data-min="20" data-max="2000" data-step="10" data-value="300" data-label="Release (ms)"></div>
+            <div data-knob="eSens" data-min="0.1" data-max="5" data-step="0.05" data-value="1.20" data-label="Sensitivity"></div>
+            <div data-knob="eCurve" data-min="0.2" data-max="3" data-step="0.05" data-value="1.20" data-label="Curve / Punch"></div>
+            <div data-knob="eJitter" data-min="0" data-max="1" data-step="0.01" data-value="0.20" data-label="Jitter (hats)"></div>
+            <div data-knob="eSnap" data-min="0" data-max="1" data-step="0.01" data-value="0.30" data-label="Snap (bass)"></div>
+            <div class="meter"><div class="meter-fill" id="envMeter"></div></div>
+          </div>
+
+          <!-- Segment Roam -->
+          <div class="panel">
+            <div class="panel-title">SEGMENT ROAM</div>
+            <div class="panel-row">
+              <label>Enabled</label>
+              <input type="checkbox" id="roamOn" />
+            </div>
+            <div data-knob="rSize" data-min="0.05" data-max="1" data-step="0.01" data-value="0.25" data-label="Segment Size"></div>
+            <div data-knob="rJitter" data-min="0" data-max="1" data-step="0.01" data-value="0.5" data-label="Size Jitter"></div>
+            <div class="panel-row">
+              <label>Direction</label>
+              <select id="roamDir">
+                <option value="any">Any</option>
+                <option value="fwd">Forward</option>
+                <option value="bwd">Backward</option>
+              </select>
+            </div>
+            <div data-knob="rCont" data-min="0" data-max="1" data-step="0.01" data-value="0.35" data-label="Continuity"></div>
+            <div data-knob="rGlide" data-min="0" data-max="600" data-step="5" data-value="80" data-label="Glide (ms)"></div>
+            <div data-knob="rThresh" data-min="0.1" data-max="1" data-step="0.01" data-value="0.55" data-label="Transient Thresh"></div>
+          </div>
+
+          <!-- Momentum -->
+          <div class="panel">
+            <div class="panel-title">MOMENTUM / PHYSICS</div>
+            <div data-knob="mBass" data-min="0" data-max="3" data-step="0.05" data-value="0.80" data-label="Bass Drive"></div>
+            <div data-knob="mMid" data-min="0" data-max="3" data-step="0.05" data-value="0.40" data-label="Mid Drive"></div>
+            <div data-knob="mHigh" data-min="0" data-max="3" data-step="0.05" data-value="0.20" data-label="High Drive"></div>
+            <div data-knob="mDamp" data-min="0.5" data-max="0.999" data-step="0.001" data-value="0.92" data-label="Damping"></div>
+            <div data-knob="mElastic" data-min="0" data-max="1" data-step="0.01" data-value="0.10" data-label="Elastic Return"></div>
+          </div>
+
+          <!-- Blob Tracker -->
+          <div class="panel">
+            <div class="panel-title">BLOB TRACKER</div>
+            <div class="panel-row">
+              <label>Enabled</label>
+              <input type="checkbox" id="blobOn" checked />
+            </div>
+            <div class="panel-row">
+              <label>Style</label>
+              <select id="blobStyle">
+                <option>Circles</option>
+                <option>Hexagons</option>
+                <option>Boxes</option>
+                <option>Trails</option>
+              </select>
+            </div>
+            <div data-knob="bSens" data-min="2" data-max="80" data-step="1" data-value="22" data-label="Sensitivity"></div>
+            <div data-knob="bMinArea" data-min="10" data-max="5000" data-step="10" data-value="300" data-label="Min Area"></div>
+            <div data-knob="bMax" data-min="1" data-max="64" data-step="1" data-value="16" data-label="Max Blobs"></div>
+            <div data-knob="bSmooth" data-min="0" data-max="1" data-step="0.01" data-value="0.50" data-label="Motion Smooth"></div>
+            <div data-knob="bScale" data-min="0.15" data-max="1" data-step="0.05" data-value="0.5" data-label="Resolution"></div>
+            <div class="panel-row tiny">
+              <label><input type="checkbox" id="bIds" /> IDs</label>
+              <label><input type="checkbox" id="bXY" /> XY</label>
+              <label><input type="checkbox" id="bMetrics" checked /> Metrics</label>
+              <label><input type="checkbox" id="bConn" /> Connect</label>
+            </div>
+          </div>
+
+          <!-- Render -->
+          <div class="panel">
+            <div class="panel-title">RENDER</div>
+            <div data-knob="rTrail" data-min="0" data-max="1" data-step="0.01" data-value="0.30" data-label="Motion Trail"></div>
+            <div data-knob="rBlend" data-min="0" data-max="1" data-step="0.01" data-value="1.00" data-label="Frame Blend"></div>
+            <div data-knob="rGain" data-min="0" data-max="2" data-step="0.01" data-value="1.00" data-label="Output Gain"></div>
+            <div class="panel-row">
+              <label>Mirror Webcam</label>
+              <input type="checkbox" id="mirrorCam" checked />
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
